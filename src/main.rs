@@ -6,7 +6,6 @@ use bevy::prelude::*;
 use bevy::window::PrimaryWindow;
 use bevy::winit::WinitWindows;
 use bevy::DefaultPlugins;
-use bevy_game::GamePlugin; // ToDo: Replace bevy_game with your new crate name.
 use std::io::Cursor;
 use winit::window::Icon;
 
@@ -28,7 +27,6 @@ fn main() {
             }),
             ..default()
         }))
-        .add_plugins(GamePlugin)
         .add_systems(Startup, set_window_icon)
         .run();
 }
@@ -42,9 +40,7 @@ fn set_window_icon(
     let Some(primary) = windows.get_window(primary_entity) else {
         return;
     };
-    let icon_buf = Cursor::new(include_bytes!(
-        "../build/macos/AppIcon.iconset/icon_256x256.png"
-    ));
+    let icon_buf = Cursor::new(include_bytes!("../build/icon_1024x1024.png"));
     if let Ok(image) = image::load(icon_buf, image::ImageFormat::Png) {
         let image = image.into_rgba8();
         let (width, height) = image.dimensions();
