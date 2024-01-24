@@ -9,11 +9,14 @@ use bevy::DefaultPlugins;
 use std::io::Cursor;
 use winit::window::Icon;
 
+mod client;
+
 fn main() {
     App::new()
         .insert_resource(Msaa::Off)
         .insert_resource(AssetMetaCheck::Never)
         .insert_resource(ClearColor(Color::rgb(0.4, 0.4, 0.4)))
+        .add_plugins(client::ClientPlugin)
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Bevy game".to_string(), // ToDo
