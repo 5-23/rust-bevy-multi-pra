@@ -7,16 +7,14 @@ use std::{
     time::{Duration, Instant},
 };
 
+use bevy::math::Vec2;
+use bevy_game::*;
+
 use renet::{
     transport::{self, NetcodeServerTransport, ServerConfig},
     ConnectionConfig, RenetServer,
 };
-use renet::{DefaultChannel, ServerEvent};
-
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-struct User {
-    name: String,
-}
+use renet::{ClientId, DefaultChannel, ServerEvent};
 
 fn main() {
     let ip: SocketAddr = "127.0.0.1:4001".parse().unwrap();
@@ -33,6 +31,9 @@ fn main() {
     };
     let mut transport = NetcodeServerTransport::new(server_config, socket).unwrap();
     let mut old_time = time::Instant::now();
+
+    let mut users: HashMap<ClientId, User> = HashMap::new();
+
     loop {
         let new_time = time::Instant::now();
         let ping = new_time - old_time;
@@ -42,6 +43,16 @@ fn main() {
         while let Some(event) = server.get_event() {
             match event {
                 ServerEvent::ClientConnected { client_id } => {
+                    users.insert(
+                        client_id,
+                        User {
+                            name: String::from_utf8(
+                                transport.user_data(client_id).unwrap().to_vec(),
+                            )
+                            .unwrap(),
+                            pos: Vec2::new(0., 0.),
+                        },
+                    );
                     log(LogType::Connect, &client_id.to_string())
                 }
                 ServerEvent::ClientDisconnected { client_id, reason } => {
@@ -52,7 +63,12 @@ fn main() {
         for client_id in server.clients_id() {
             while let Some(msg) = server.receive_message(client_id, DefaultChannel::ReliableOrdered)
             {
-                println!("{:?}", bincode::deserialize::<User>(&msg));
+                match bincode::deserialize::<UdpEvent>(&msg).unwrap() {
+                    UdpEvent::Move(pos) => {
+                        (*users.get_mut(&client_id).unwrap()).pos += pos;
+                        println!("{:?}", users.get(&client_id).unwrap().pos);
+                    }
+                }
             }
         }
 
