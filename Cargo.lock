@@ -601,6 +601,7 @@ dependencies = [
  "bincode",
  "embed-resource",
  "image",
+ "lazy_static",
  "rand",
  "renet",
  "serde",

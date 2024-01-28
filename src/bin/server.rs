@@ -53,9 +53,31 @@ fn main() {
                             pos: Vec2::new(0., 0.),
                         },
                     );
+
+                    let bin = bincode::serialize(&UdpEvent::Connect(
+                        client_id,
+                        String::from_utf8(transport.user_data(client_id).unwrap().to_vec())
+                            .unwrap(),
+                    ))
+                    .unwrap();
+                    server.broadcast_message_except(
+                        client_id,
+                        DefaultChannel::ReliableOrdered,
+                        bin,
+                    );
                     log(LogType::Connect, &client_id.to_string())
                 }
                 ServerEvent::ClientDisconnected { client_id, reason } => {
+                    let bin = bincode::serialize(&UdpEvent::Disconnect(
+                        client_id,
+                        users.remove(&client_id).unwrap().name,
+                    ))
+                    .unwrap();
+                    server.broadcast_message_except(
+                        client_id,
+                        DefaultChannel::ReliableOrdered,
+                        bin,
+                    );
                     log(LogType::Disconnect, &format!("{client_id} | {reason:?}"))
                 }
             }
@@ -64,10 +86,17 @@ fn main() {
             while let Some(msg) = server.receive_message(client_id, DefaultChannel::ReliableOrdered)
             {
                 match bincode::deserialize::<UdpEvent>(&msg).unwrap() {
-                    UdpEvent::Move(pos) => {
+                    UdpEvent::Move(id, pos) => {
                         (*users.get_mut(&client_id).unwrap()).pos += pos;
-                        println!("{:?}", users.get(&client_id).unwrap().pos);
+                        // println!("{:?}", users.get(&client_id).unwrap().pos);
+                        let bin = bincode::serialize(&UdpEvent::Move(
+                            id,
+                            users.get(&client_id).unwrap().pos,
+                        ))
+                        .unwrap();
+                        server.broadcast_message_except(id, DefaultChannel::ReliableOrdered, bin)
                     }
+                    _ => {}
                 }
             }
         }
