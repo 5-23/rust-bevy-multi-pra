@@ -7,12 +7,17 @@ use std::{
     time::{Duration, Instant},
 };
 
-use renet::ServerEvent;
 use renet::{
     transport::{self, NetcodeServerTransport, ServerConfig},
     ConnectionConfig, RenetServer,
 };
-// use renet;
+use renet::{DefaultChannel, ServerEvent};
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct User {
+    name: String,
+}
+
 fn main() {
     let ip: SocketAddr = "127.0.0.1:4001".parse().unwrap();
     let mut server = RenetServer::new(ConnectionConfig::default());
@@ -44,7 +49,12 @@ fn main() {
                 }
             }
         }
-        // transport.
+        for client_id in server.clients_id() {
+            while let Some(msg) = server.receive_message(client_id, DefaultChannel::ReliableOrdered)
+            {
+                println!("{:?}", bincode::deserialize::<User>(&msg));
+            }
+        }
 
         transport.send_packets(&mut server);
         thread::sleep(Duration::from_micros(50))

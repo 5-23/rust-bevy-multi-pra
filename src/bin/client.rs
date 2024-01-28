@@ -6,8 +6,13 @@ use std::{
 
 use renet::{
     transport::{ClientAuthentication, NetcodeClientTransport, NETCODE_USER_DATA_BYTES},
-    ConnectionConfig, RenetClient,
+    ConnectionConfig, DefaultChannel, RenetClient,
 };
+
+#[derive(serde::Serialize)]
+struct User {
+    name: String,
+}
 
 fn main() {
     let ip: SocketAddr = "127.0.0.1:4001".parse().unwrap();
@@ -38,7 +43,12 @@ fn main() {
         let ping = old_time - new_time;
         old_time = new_time;
         transport.update(ping, &mut client).unwrap();
-        if client.is_connected() {}
+        if client.is_connected() {
+            let test = bincode::serialize(&User {
+                name: "5-23".to_string(),
+            });
+            client.send_message(DefaultChannel::ReliableOrdered, test.unwrap())
+        }
 
         transport.send_packets(&mut client).unwrap();
         thread::sleep(time::Duration::from_micros(50))
