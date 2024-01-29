@@ -18,16 +18,15 @@ use std::thread;
 use std::time::{self, SystemTime};
 use winit::window::Icon;
 
-mod client;
 lazy_static! {
     static ref USERS: Mutex<HashMap<ClientId, User>> = Mutex::new(HashMap::new());
 }
+
 fn main() {
     App::new()
-        .insert_resource(Msaa::Off)
-        .insert_resource(AssetMetaCheck::Never)
-        .insert_resource(ClearColor(Color::rgb(0.4, 0.4, 0.4)))
-        .add_plugins(client::ClientPlugin)
+        // .insert_resource(Msaa::Off)
+        // .insert_resource(AssetMetaCheck::Never)
+        // .insert_resource(ClearColor(Color::rgb(0.4, 0.4, 0.4)))
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Bevy game".to_string(), // ToDo
@@ -41,11 +40,13 @@ fn main() {
             }),
             ..default()
         }))
+        // .add_plugins(DefaultPlugins)
         .add_systems(Startup, set_window_icon)
+        .add_systems(Startup, startup)
         .add_systems(Startup, client_system)
+        .add_systems(Update, user_management)
         .run();
 }
-
 fn set_window_icon(
     windows: NonSend<WinitWindows>,
     primary_window: Query<Entity, With<PrimaryWindow>>,
@@ -62,6 +63,10 @@ fn set_window_icon(
         let icon = Icon::from_rgba(rgba, width, height).unwrap();
         primary.set_window_icon(Some(icon));
     };
+}
+
+fn startup(mut commands: Commands) {
+    commands.spawn(Camera2dBundle::default());
 }
 
 fn client_system() {
@@ -85,6 +90,7 @@ fn client_system() {
         users.insert(
             client_id,
             User {
+                id: client_id,
                 name: name.clone(),
                 pos: Vec2::new(0., 0.),
             },
@@ -122,8 +128,13 @@ fn client_system() {
             while let Some(msg) = client.receive_message(DefaultChannel::ReliableOrdered) {
                 match bincode::deserialize::<UdpEvent>(&msg).unwrap() {
                     UdpEvent::Move(client_id, pos) => {
-                        let mut users = USERS.lock().unwrap();
-                        (*users.get_mut(&client_id).unwrap()).pos = pos;
+                        let users = USERS.lock();
+                        if users.is_ok() {
+                            let mut users = users.unwrap();
+                            if let Some(mut user) = users.get_mut(&client_id) {
+                                user.pos = pos;
+                            }
+                        }
                     }
                     UdpEvent::Connect(client_id, name) => {
                         println!("{name}({client_id}) CONNECTED");
@@ -131,6 +142,7 @@ fn client_system() {
                         users.insert(
                             client_id,
                             User {
+                                id: client_id,
                                 name: name,
                                 pos: Vec2::new(0., 0.),
                             },
@@ -150,4 +162,43 @@ fn client_system() {
         thread::sleep(time::Duration::from_micros(50))
     });
     println!("CLIENT SYSTEM SPAWN")
+}
+
+fn user_management(mut commands: Commands, mut user: Query<&mut User, With<User>>) {
+    let users = USERS.lock();
+    if users.is_ok() {
+        let users = users.unwrap();
+        for (id, data) in users.iter() {
+            let mut dont_work = true;
+            for mut user in &mut user {
+                if id == &user.id {
+                    user.pos = data.pos;
+                    dont_work = false;
+                }
+            }
+            // println!("{:?}", user);
+            if dont_work {
+                println!("spawn {}", id.clone());
+                commands
+                    .spawn(SpriteBundle {
+                        sprite: Sprite {
+                            custom_size: Some(Vec2::new(100., 100.)),
+                            color: Color::Rgba {
+                                red: 0.5,
+                                green: 0.5,
+                                blue: 0.5,
+                                alpha: 0.3,
+                            },
+                            ..Default::default()
+                        },
+                        ..Default::default()
+                    })
+                    .insert(User {
+                        id: id.clone(),
+                        name: data.name.to_string(),
+                        pos: Vec2::new(0., 0.),
+                    });
+            }
+        }
+    }
 }

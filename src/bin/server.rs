@@ -46,6 +46,7 @@ fn main() {
                     users.insert(
                         client_id,
                         User {
+                            id: client_id,
                             name: String::from_utf8(
                                 transport.user_data(client_id).unwrap().to_vec(),
                             )
