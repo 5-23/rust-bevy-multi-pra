@@ -40,7 +40,10 @@ fn main() {
         old_time = new_time;
         transport.update(ping, &mut server).unwrap();
 
-        while let Some(event) = server.get_event() {
+        let event = server.get_event();
+
+        if event.is_some() {
+            let mut event = event.unwrap();
             match event {
                 ServerEvent::ClientConnected { client_id } => {
                     users.insert(
@@ -54,6 +57,18 @@ fn main() {
                             pos: Vec2::new(0., 0.),
                         },
                     );
+                    server.send_message(
+                        client_id,
+                        DefaultChannel::ReliableOrdered,
+                        bincode::serialize(&UdpEvent::UserInfo({
+                            let mut users_copy = HashMap::new();
+                            for (k, v) in &users {
+                                users_copy.insert(*k, (*v).clone());
+                            }
+                            users_copy
+                        }))
+                        .unwrap(),
+                    );
 
                     let bin = bincode::serialize(&UdpEvent::Connect(
                         client_id,
@@ -61,11 +76,7 @@ fn main() {
                             .unwrap(),
                     ))
                     .unwrap();
-                    server.broadcast_message_except(
-                        client_id,
-                        DefaultChannel::ReliableOrdered,
-                        bin,
-                    );
+                    server.broadcast_message(DefaultChannel::ReliableOrdered, bin);
                     log(LogType::Connect, &client_id.to_string())
                 }
                 ServerEvent::ClientDisconnected { client_id, reason } => {
@@ -84,18 +95,19 @@ fn main() {
             }
         }
         for client_id in server.clients_id() {
-            while let Some(msg) = server.receive_message(client_id, DefaultChannel::ReliableOrdered)
-            {
+            let msg = server.receive_message(client_id, DefaultChannel::ReliableOrdered);
+            if msg.is_some() {
+                let msg = msg.unwrap();
                 match bincode::deserialize::<UdpEvent>(&msg).unwrap() {
                     UdpEvent::Move(id, pos) => {
                         (*users.get_mut(&client_id).unwrap()).pos += pos;
-                        // println!("{:?}", users.get(&client_id).unwrap().pos);
+                        // println!("{id:?} {pos:?}");
                         let bin = bincode::serialize(&UdpEvent::Move(
                             id,
                             users.get(&client_id).unwrap().pos,
                         ))
                         .unwrap();
-                        server.broadcast_message_except(id, DefaultChannel::ReliableOrdered, bin)
+                        server.broadcast_message(DefaultChannel::ReliableOrdered, bin)
                     }
                     _ => {}
                 }

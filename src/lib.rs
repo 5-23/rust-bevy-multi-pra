@@ -1,6 +1,8 @@
+use std::collections::HashMap;
+
 use bevy::{ecs::component::Component, math::Vec2};
 use renet::ClientId;
-#[derive(serde::Serialize, serde::Deserialize, Debug, Component)]
+#[derive(serde::Serialize, serde::Deserialize, Debug, Component, Clone)]
 pub struct User {
     pub id: ClientId,
     pub name: String,
@@ -15,4 +17,5 @@ pub enum UdpEvent {
     Connect(ClientId, String),
     // id, name
     Disconnect(ClientId, String),
+    UserInfo(HashMap<ClientId, User>),
 }

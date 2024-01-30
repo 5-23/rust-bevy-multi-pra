@@ -13,14 +13,18 @@ use renet::{ClientId, ConnectionConfig, DefaultChannel, RenetClient};
 use std::collections::HashMap;
 use std::io::Cursor;
 use std::net::{SocketAddr, UdpSocket};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{self, SystemTime};
 use winit::window::Icon;
 
 lazy_static! {
-    static ref USERS: Mutex<HashMap<ClientId, User>> = Mutex::new(HashMap::new());
+    static ref USERS: Arc<Mutex<HashMap<ClientId, User>>> = Arc::new(Mutex::new(HashMap::new()));
+    static ref CLIENT: Arc<Mutex<RenetClient>> =
+        Arc::new(Mutex::new(RenetClient::new(ConnectionConfig::default())));
 }
+
+static mut CLIENT_ID: ClientId = ClientId::from_raw(1);
 
 fn main() {
     App::new()
@@ -45,6 +49,7 @@ fn main() {
         .add_systems(Startup, startup)
         .add_systems(Startup, client_system)
         .add_systems(Update, user_management)
+        .add_systems(Update, user_movement)
         .run();
 }
 fn set_window_icon(
@@ -85,6 +90,8 @@ fn client_system() {
             .unwrap();
         ClientId::from_raw(a.as_millis() as u64)
     };
+    unsafe { CLIENT_ID = client_id }
+
     {
         let mut users = USERS.lock().unwrap();
         users.insert(
@@ -92,7 +99,7 @@ fn client_system() {
             User {
                 id: client_id,
                 name: name.clone(),
-                pos: Vec2::new(0., 0.),
+                pos: Vec2::default(),
             },
         );
     }
@@ -120,65 +127,84 @@ fn client_system() {
         let new_time = time::Instant::now();
         let ping = old_time - new_time;
         old_time = new_time;
-        transport.update(ping, &mut client).unwrap();
-        if client.is_connected() {
-            let m = bincode::serialize(&UdpEvent::Move(client_id, Vec2::new(1., 0.))).unwrap();
-            client.send_message(DefaultChannel::ReliableOrdered, m);
-
-            while let Some(msg) = client.receive_message(DefaultChannel::ReliableOrdered) {
-                match bincode::deserialize::<UdpEvent>(&msg).unwrap() {
-                    UdpEvent::Move(client_id, pos) => {
-                        let users = USERS.lock();
-                        if users.is_ok() {
-                            let mut users = users.unwrap();
-                            if let Some(mut user) = users.get_mut(&client_id) {
-                                user.pos = pos;
+        // transport.update(ping, &mut client).unwrap();
+        let client = CLIENT.lock();
+        if client.is_ok() {
+            let mut client = client.unwrap();
+            transport.update(ping, &mut client).unwrap();
+            if client.is_connected() {
+                while let Some(msg) = client.receive_message(DefaultChannel::ReliableOrdered) {
+                    match bincode::deserialize::<UdpEvent>(&msg).unwrap() {
+                        UdpEvent::Move(client_id, pos) => {
+                            let users = USERS.lock();
+                            if users.is_ok() {
+                                let mut users = users.unwrap();
+                                if let Some(user) = users.get_mut(&client_id) {
+                                    user.pos = pos;
+                                }
                             }
                         }
+                        UdpEvent::Connect(client_id, name) => {
+                            println!("{name}({client_id}) CONNECTED");
+                            let mut users = USERS.lock().unwrap();
+                            users.insert(
+                                client_id,
+                                User {
+                                    id: client_id,
+                                    name: name,
+                                    pos: Vec2::default(),
+                                },
+                            );
+                        }
+                        UdpEvent::Disconnect(client_id, name) => {
+                            println!("{name}({client_id}) DISCONNECTED");
+                            let mut users = USERS.lock().unwrap();
+                            users.remove(&client_id);
+                        }
+                        UdpEvent::UserInfo(info) => {
+                            let users = USERS.lock();
+                            if users.is_ok() {
+                                let mut users = users.unwrap();
+                                for (k, v) in info {
+                                    users.insert(k, v);
+                                }
+                            }
+                        }
+                        _ => {}
                     }
-                    UdpEvent::Connect(client_id, name) => {
-                        println!("{name}({client_id}) CONNECTED");
-                        let mut users = USERS.lock().unwrap();
-                        users.insert(
-                            client_id,
-                            User {
-                                id: client_id,
-                                name: name,
-                                pos: Vec2::new(0., 0.),
-                            },
-                        );
-                    }
-                    UdpEvent::Disconnect(client_id, name) => {
-                        println!("{name}({client_id}) DISCONNECTED");
-                        let mut users = USERS.lock().unwrap();
-                        users.remove(&client_id);
-                    }
-                    _ => {}
                 }
             }
         }
-
-        transport.send_packets(&mut client).unwrap();
+        let a = CLIENT.lock();
+        if a.is_ok() {
+            let mut a = a.unwrap();
+            transport.send_packets(&mut a).unwrap();
+        }
+        // transport.send_packets(&mut client).unwrap();
         thread::sleep(time::Duration::from_micros(50))
     });
     println!("CLIENT SYSTEM SPAWN")
 }
 
-fn user_management(mut commands: Commands, mut user: Query<&mut User, With<User>>) {
+fn user_management(
+    mut commands: Commands,
+    mut user: Query<(&mut Transform, &mut User), With<User>>,
+    asset_server: Res<AssetServer>,
+) {
     let users = USERS.lock();
     if users.is_ok() {
         let users = users.unwrap();
         for (id, data) in users.iter() {
             let mut dont_work = true;
-            for mut user in &mut user {
+            for (mut transform, mut user) in &mut user {
                 if id == &user.id {
                     user.pos = data.pos;
+                    transform.translation = Vec3::new(user.pos.x, user.pos.y, 0.);
                     dont_work = false;
                 }
             }
-            // println!("{:?}", user);
+
             if dont_work {
-                println!("spawn {}", id.clone());
                 commands
                     .spawn(SpriteBundle {
                         sprite: Sprite {
@@ -191,14 +217,65 @@ fn user_management(mut commands: Commands, mut user: Query<&mut User, With<User>
                             },
                             ..Default::default()
                         },
+
                         ..Default::default()
                     })
                     .insert(User {
                         id: id.clone(),
                         name: data.name.to_string(),
-                        pos: Vec2::new(0., 0.),
+                        pos: Vec2::default(),
+                    });
+                commands
+                    .spawn(
+                        // Create a TextBundle that has a Text with a single section.
+                        Text2dBundle {
+                            text: Text::from_section(
+                                data.name.clone(),
+                                TextStyle {
+                                    font: asset_server.load("fonts/IntroDemoCond-BlackCAPS.ttf"),
+                                    font_size: 35.,
+                                    ..Default::default()
+                                },
+                            )
+                            .with_alignment(TextAlignment::Center),
+                            ..default()
+                        },
+                    )
+                    .insert(User {
+                        id: id.clone(),
+                        name: data.name.to_string(),
+                        pos: Vec2::default(),
                     });
             }
         }
+    }
+}
+
+fn user_movement(input: Res<Input<KeyCode>>) {
+    let client = CLIENT.lock();
+    if client.is_ok() {
+        let mut client = client.unwrap();
+        let mut m = Vec2::default();
+        let speed = 1.5;
+        if input.pressed(KeyCode::Up) {
+            m.y += speed
+        }
+        if input.pressed(KeyCode::Down) {
+            m.y -= speed
+        }
+
+        if input.pressed(KeyCode::Left) {
+            m.x -= speed
+        }
+        if input.pressed(KeyCode::Right) {
+            m.x += speed
+        }
+        if m == Vec2::default() {
+            return;
+        }
+        client.send_message(
+            DefaultChannel::ReliableOrdered,
+            bincode::serialize(&UdpEvent::Move(unsafe { CLIENT_ID }, m)).unwrap(),
+        );
     }
 }
